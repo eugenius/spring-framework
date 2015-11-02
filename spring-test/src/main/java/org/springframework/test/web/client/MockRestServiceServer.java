@@ -18,8 +18,7 @@ package org.springframework.test.web.client;
 
 import java.io.IOException;
 import java.net.URI;
-import java.util.Iterator;
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.http.HttpMethod;
@@ -27,6 +26,8 @@ import org.springframework.http.client.AsyncClientHttpRequest;
 import org.springframework.http.client.AsyncClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequest;
 import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.ClientHttpResponse;
+import org.springframework.mock.http.client.MockAsyncClientHttpRequest;
 import org.springframework.test.web.client.match.MockRestRequestMatchers;
 import org.springframework.test.web.client.response.MockRestResponseCreators;
 import org.springframework.util.Assert;
@@ -86,15 +87,18 @@ import org.springframework.web.client.support.RestGatewaySupport;
  *
  * @author Craig Walls
  * @author Rossen Stoyanchev
+ * @author Eugene Beschastnov
  * @since 3.2
  */
 public class MockRestServiceServer {
 
-	private final List<RequestMatcherClientHttpRequest> expectedRequests =
-			new LinkedList<RequestMatcherClientHttpRequest>();
+	private final List<RequestExpectation> expectations = new ArrayList<RequestExpectation>();
 
-	private final List<RequestMatcherClientHttpRequest> actualRequests =
-			new LinkedList<RequestMatcherClientHttpRequest>();
+ 	private final List<ClientHttpRequest> actualRequests = new ArrayList<ClientHttpRequest>();
+
+	private boolean inAnyOrder = false;
+
+	private boolean explainMoreOnError = false;
 
 
 	/**
@@ -145,6 +149,15 @@ public class MockRestServiceServer {
 		return createServer(restGateway.getRestTemplate());
 	}
 
+	public MockRestServiceServer withRequestsInAnyOrder() {
+		this.inAnyOrder = true;
+		return this;
+	}
+
+	public MockRestServiceServer explainMoreOnError() {
+		this.explainMoreOnError = true;
+		return this;
+	}
 
 	/**
 	 * Set up a new HTTP request expectation. The returned {@link ResponseActions}
@@ -155,9 +168,10 @@ public class MockRestServiceServer {
 	 * @return used to set up further expectations or to define a response
 	 */
 	public ResponseActions expect(RequestMatcher requestMatcher) {
-		Assert.state(this.actualRequests.isEmpty(), "Can't add more expected requests with test already underway");
-		RequestMatcherClientHttpRequest request = new RequestMatcherClientHttpRequest(requestMatcher);
-		this.expectedRequests.add(request);
+		Assert.state(this.actualRequests.isEmpty(),
+				"Can't add more expected requests with test already underway");
+		RequestExpectation request = new RequestExpectation(requestMatcher);
+		this.expectations.add(request);
 		return request;
 	}
 
@@ -167,66 +181,158 @@ public class MockRestServiceServer {
 	 * @throws AssertionError when some expectations were not met
 	 */
 	public void verify() {
-		if (this.expectedRequests.isEmpty() || this.expectedRequests.equals(this.actualRequests)) {
+		if (this.expectations.isEmpty() || onlySkippableExpectationsLeft()) {
 			return;
 		}
 		throw new AssertionError(getVerifyMessage());
 	}
 
+	private boolean onlySkippableExpectationsLeft() {
+		for (RequestExpectation expectation : this.expectations) {
+			if (expectation.getCountExpectation().isMoreCallsRequired()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	private String getVerifyMessage() {
-		StringBuilder sb = new StringBuilder("Further request(s) expected\n");
+		return "Further request(s) expected\n" + getRequestsInfo();
+	}
+
+	private String getRequestsInfo() {
+		StringBuilder sb = new StringBuilder();
 		if (this.actualRequests.size() > 0) {
 			sb.append("The following ");
 		}
 		sb.append(this.actualRequests.size()).append(" out of ");
-		sb.append(this.expectedRequests.size()).append(" were executed");
+		sb.append(this.actualRequests.size() + getAmountOfRemainingRequiredCalls());
+		if (isExtraCallsAllowed()) {
+				sb.append("+");
+		}
 
+		sb.append(" were executed\nActual:");
 		if (this.actualRequests.size() > 0) {
-			sb.append(":\n");
-			for (RequestMatcherClientHttpRequest request : this.actualRequests) {
+			sb.append("\n");
+			for (ClientHttpRequest request : this.actualRequests) {
 				sb.append(request.toString()).append("\n");
 			}
+		} else {
+			sb.append(" none\n");
 		}
+
+		sb.append("More expected:");
+		if (this.expectations.size() > 0) {
+			sb.append("\n");
+			for (RequestExpectation expectation : this.expectations) {
+				sb.append(expectation.toString()).append("\n");
+			}
+		} else {
+			sb.append(" none\n");
+		}
+
 		return sb.toString();
 	}
 
+	private boolean isExtraCallsAllowed() {
+		for (RequestExpectation expectation : expectations) {
+			if (expectation.getCountExpectation().isExtraCallsAllowed()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private int getAmountOfRemainingRequiredCalls() {
+		int requiredCalls = 0;
+		for (RequestExpectation expectation : this.expectations) {
+			CountExpectation countExpectation = expectation.getCountExpectation();
+			requiredCalls += countExpectation.getAmountOfRequiredCallsLeft();
+		}
+		return requiredCalls;
+	}
 
 	/**
-	 * Mock ClientHttpRequestFactory that creates requests by iterating
-	 * over the list of expected {@link RequestMatcherClientHttpRequest}'s.
+	 * Mock ClientHttpRequestFactory that creates {@link RequestMatcherClientHttpRequest}'s.
 	 */
 	private class RequestMatcherClientHttpRequestFactory
 			implements ClientHttpRequestFactory, AsyncClientHttpRequestFactory {
 
-		private Iterator<RequestMatcherClientHttpRequest> requestIterator;
-
 		@Override
 		public ClientHttpRequest createRequest(URI uri, HttpMethod httpMethod) throws IOException {
-			return createRequestInternal(uri, httpMethod);
+			return new RequestMatcherClientHttpRequest(uri, httpMethod);
 		}
 
 		@Override
 		public AsyncClientHttpRequest createAsyncRequest(URI uri, HttpMethod httpMethod) throws IOException {
-			return createRequestInternal(uri, httpMethod);
+			return new RequestMatcherClientHttpRequest(uri, httpMethod);
+		}
+	}
+
+	/**
+	 * A specialization of {@code MockClientHttpRequest} that matches the request
+	 * against a set of expectations, via {@link RequestExpectation} instances. The
+	 * expectations are checked when the request is executed. This class also uses a
+	 * {@link ResponseCreator} to create the response.
+	 */
+	private class RequestMatcherClientHttpRequest extends MockAsyncClientHttpRequest {
+
+		public RequestMatcherClientHttpRequest(URI uri, HttpMethod httpMethod) {
+			super(httpMethod, uri);
 		}
 
-		private RequestMatcherClientHttpRequest createRequestInternal(URI uri, HttpMethod httpMethod) {
-			Assert.notNull(uri, "'uri' must not be null");
-			Assert.notNull(httpMethod, "'httpMethod' must not be null");
+		@Override
+		public ClientHttpResponse executeInternal() throws IOException {
+			Assert.notNull(getURI(), "'uri' must not be null");
+			Assert.notNull(getMethod(), "'httpMethod' must not be null");
 
-			if (this.requestIterator == null) {
-				this.requestIterator = MockRestServiceServer.this.expectedRequests.iterator();
+			RequestExpectation expectation = matchExpectation();
+
+			if (expectation == null) {
+				throw new AssertionError("No further requests expected: HTTP " + getMethod() + " " + getURI() +
+										 (explainMoreOnError ? "\n" + getRequestsInfo() : ""));
 			}
-			if (!this.requestIterator.hasNext()) {
-				throw new AssertionError("No further requests expected: HTTP " + httpMethod + " " + uri);
+
+			CountExpectation countExpectation = expectation.getCountExpectation();
+			countExpectation.countNewCall();
+			if (!countExpectation.isMoreCallsAllowed()) {
+				MockRestServiceServer.this.expectations.remove(expectation);
 			}
 
-			RequestMatcherClientHttpRequest request = this.requestIterator.next();
-			request.setURI(uri);
-			request.setMethod(httpMethod);
+			MockRestServiceServer.this.actualRequests.add(this);
+			setResponse(expectation.getResponseCreator().createResponse(this));
+			return super.executeInternal();
+		}
 
-			MockRestServiceServer.this.actualRequests.add(request);
-			return request;
+		private RequestExpectation matchExpectation() throws IOException {
+			RequestExpectation expectation = null;
+
+			if (!inAnyOrder) {
+				if (!MockRestServiceServer.this.expectations.isEmpty()) {
+					expectation = MockRestServiceServer.this.expectations.get(0);
+					try {
+						expectation.check(this);
+					} catch (AssertionError error) {
+						if (expectation.getCountExpectation().isMoreCallsRequired()) {
+							throw error;
+						} else {
+							MockRestServiceServer.this.expectations.remove(expectation);
+							return matchExpectation();
+						}
+					}
+				}
+			} else {
+				for (RequestExpectation expectationToCheck : MockRestServiceServer.this.expectations) {
+					try {
+						expectationToCheck.check(this);
+						expectation = expectationToCheck;
+					} catch (AssertionError error) {
+						continue;
+					}
+					break;
+				}
+			}
+			return expectation;
 		}
 	}
 

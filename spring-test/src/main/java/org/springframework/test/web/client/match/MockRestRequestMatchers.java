@@ -16,11 +16,12 @@
 
 package org.springframework.test.web.client.match;
 
+import javax.xml.xpath.XPathExpressionException;
 import java.io.IOException;
 import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import javax.xml.xpath.XPathExpressionException;
 
 import org.hamcrest.Matcher;
 
@@ -57,6 +58,11 @@ public abstract class MockRestRequestMatchers {
 			@Override
 			public void match(ClientHttpRequest request) throws AssertionError {
 			}
+
+			@Override
+			public String toString() {
+				return "match[anything]";
+			}
 		};
 	}
 
@@ -71,6 +77,11 @@ public abstract class MockRestRequestMatchers {
 			@Override
 			public void match(ClientHttpRequest request) throws IOException, AssertionError {
 				assertThat("Request URI", request.getURI().toString(), matcher);
+			}
+
+			@Override
+			public String toString() {
+				return "match[uri matches " + matcher + "]";
 			}
 		};
 	}
@@ -87,6 +98,11 @@ public abstract class MockRestRequestMatchers {
 			public void match(ClientHttpRequest request) throws IOException, AssertionError {
 				assertEquals("Request URI", expectedUri, request.getURI().toString());
 			}
+
+			@Override
+			public String toString() {
+				return "match[uri=" + expectedUri + "]";
+			}
 		};
 	}
 
@@ -102,6 +118,11 @@ public abstract class MockRestRequestMatchers {
 			public void match(ClientHttpRequest request) throws AssertionError {
 				AssertionErrors.assertEquals("Unexpected HttpMethod", method, request.getMethod());
 			}
+
+			@Override
+			public String toString() {
+				return "match[httpMethod=" + method + "]";
+			}
 		};
 	}
 
@@ -116,6 +137,11 @@ public abstract class MockRestRequestMatchers {
 			@Override
 			public void match(ClientHttpRequest request) throws IOException, AssertionError {
 				AssertionErrors.assertEquals("Unexpected request", uri, request.getURI());
+			}
+
+			@Override
+			public String toString() {
+				return "match[uri=" + uri + "]";
 			}
 		};
 	}
@@ -133,6 +159,11 @@ public abstract class MockRestRequestMatchers {
 					assertThat("Request header", request.getHeaders().get(name).get(i), matchers[i]);
 				}
 			}
+
+			@Override
+			public String toString() {
+				return "match[header '" + name + "' matches " + Arrays.toString(matchers) + "]";
+			}
 		};
 	}
 
@@ -148,6 +179,11 @@ public abstract class MockRestRequestMatchers {
 					assertEquals("Request header + [" + name + "]",
 							expectedValues[i], request.getHeaders().get(name).get(i));
 				}
+			}
+
+			@Override
+			public String toString() {
+				return "match[header '" + name + "' should be one of " + expectedValues + "]";
 			}
 		};
 	}

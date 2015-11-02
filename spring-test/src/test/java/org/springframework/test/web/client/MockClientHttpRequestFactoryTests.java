@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2014 the original author or authors.
+ * Copyright 2002-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ import org.springframework.web.client.RestTemplate;
 
 import static org.junit.Assert.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
 /**
  * Tests for
@@ -52,10 +53,9 @@ public class MockClientHttpRequestFactoryTests {
 	@Test
 	public void createRequest() throws Exception {
 		URI uri = new URI("/foo");
-		ClientHttpRequest expected = (ClientHttpRequest) this.server.expect(anything());
+		this.server.expect(anything());
 		ClientHttpRequest actual = this.factory.createRequest(uri, HttpMethod.GET);
 
-		assertSame(expected, actual);
 		assertEquals(uri, actual.getURI());
 		assertEquals(HttpMethod.GET, actual.getMethod());
 	}
@@ -63,7 +63,7 @@ public class MockClientHttpRequestFactoryTests {
 	@Test
 	public void noFurtherRequestsExpected() throws Exception {
 		try {
-			this.factory.createRequest(new URI("/foo"), HttpMethod.GET);
+			this.factory.createRequest(new URI("/foo"), HttpMethod.GET).execute();
 		}
 		catch (AssertionError error) {
 			assertEquals("No further requests expected: HTTP GET /foo", error.getMessage());
@@ -77,19 +77,19 @@ public class MockClientHttpRequestFactoryTests {
 
 	@Test
 	public void verifyExpectedEqualExecuted() throws Exception {
-		this.server.expect(anything());
-		this.server.expect(anything());
+		this.server.expect(anything()).andRespond(withSuccess());
+		this.server.expect(anything()).andRespond(withSuccess());
 
-		this.factory.createRequest(new URI("/foo"), HttpMethod.GET);
-		this.factory.createRequest(new URI("/bar"), HttpMethod.POST);
+		this.factory.createRequest(new URI("/foo"), HttpMethod.GET).execute();
+		this.factory.createRequest(new URI("/bar"), HttpMethod.POST).execute();
 	}
 
 	@Test
 	public void verifyMoreExpected() throws Exception {
-		this.server.expect(anything());
-		this.server.expect(anything());
+		this.server.expect(anything()).andRespond(withSuccess());
+		this.server.expect(anything()).andRespond(withSuccess());
 
-		this.factory.createRequest(new URI("/foo"), HttpMethod.GET);
+		this.factory.createRequest(new URI("/foo"), HttpMethod.GET).execute();
 
 		try {
 			this.server.verify();

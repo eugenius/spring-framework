@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2012 the original author or authors.
+ * Copyright 2002-2015 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,26 @@ public interface ResponseActions {
 	ResponseActions andExpect(RequestMatcher requestMatcher);
 
 	/**
+	 * Add a count expectation.
+	 * @return the expectation
+	 */
+	ResponseActions andExpectIt(CountExpectation countExpectation);
+
+	/**
+     * Specify the amount of times request expected.
+	 * Shortcut for {@link CountExpectation#times(int)}
+	 * @return the expectation
+     */
+    ResponseActions times(int times);
+
+	/**
+	 * Allow request to be called any number of times.
+	 * Shortcut for {@link CountExpectation#anyNumberOfTimes()}
+	 * @return the expectation
+	 */
+    ResponseActions anyNumberOfTimes();
+
+    /**
 	 * Define the response.
 	 * @param responseCreator the creator of the response
 	 */
